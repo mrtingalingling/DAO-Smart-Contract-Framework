@@ -77,3 +77,26 @@ Each future functional change appends an entry here to maintain an auditable, mi
 **Deliberately not changed:** none.
 
 **Uncertainties:** none.
+
+## 2026-09-23T23:13:00Z — docs: comprehensive documentation suite and dao explanation
+**What changed:**
+- Created dedicated `docs/` suite:
+  - `docs/ARCHITECTURE.md`: In-depth breakdown of multi-stage governance, bounded rationality, state machine transitions, quadratic math formulations ($V = \lfloor\sqrt{C}\rfloor$), dynamic credit budgeting, and UUPS storage gap protection.
+  - `docs/FEDERATED_AGENCY_GUIDE.md`: Developer guide explaining how independent agencies and organizations deploy customized DAOs via `ContractsFactory`, issue multi-tier ERC-1155 badges, and integrate custom reputation systems via `ICrsManager`.
+  - `docs/DEPLOYMENT_AND_OPERATIONS.md`: Operations and deployment manual covering Anvil local simulation, testnet deployment, and end-to-end `cast` CLI command workflows for all proposal lifecycle stages.
+- Enhanced `README.md` with deep links to `docs/`, clear lifecycle ASCII diagrams, and technical summaries while preserving all original text and diagrams.
+
+**Why:** Addresses user request to ensure all documentation is clean, detailed, and thoroughly explains how the multi-stage DAO framework works.
+
+**Files touched:**
+- `docs/ARCHITECTURE.md`
+- `docs/FEDERATED_AGENCY_GUIDE.md`
+- `docs/DEPLOYMENT_AND_OPERATIONS.md`
+- `README.md`
+- `REPO_EDIT_LOG.md`
+
+**Tests added:** none (documentation update only; all 25 existing tests pass).
+
+**Deliberately not changed:** Smart contract bytecodes and logic were unchanged.
+
+**Uncertainties:** none.
