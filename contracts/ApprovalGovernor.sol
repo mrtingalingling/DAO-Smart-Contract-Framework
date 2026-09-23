@@ -51,17 +51,16 @@ contract ApprovalGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     }
 
     function initialize(
-        address _governorGeneral,
+        address _owner,
         address _memberToken,
         address _crsManager,
         uint256 _quorumScore
     ) public initializer {
-        if (_governorGeneral == address(0) || _memberToken == address(0) || _crsManager == address(0)) {
+        if (_owner == address(0) || _memberToken == address(0) || _crsManager == address(0)) {
             revert ZeroAddress();
         }
-        __Ownable_init(msg.sender);
+        __Ownable_init(_owner);
 
-        governorGeneral = _governorGeneral;
         memberToken = ERC1155TokenUpgradeable(_memberToken);
         crsManager = ICrsManager(_crsManager);
         quorumScore = _quorumScore;

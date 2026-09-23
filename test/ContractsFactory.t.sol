@@ -3,7 +3,12 @@ pragma solidity ^0.8.27;
 
 import "forge-std/Test.sol";
 import "contracts/ContractsFactory.sol";
+import "contracts/MemberToken.sol";
+import "contracts/ApprovalGovernor.sol";
+import "contracts/QuadraticGovernor.sol";
+import "contracts/GovernorGeneral.sol";
 import "test/mocks/MockCrsManager.sol";
+import {TimelockControllerUpgradeable} from "@openzeppelin/contracts-upgradeable/governance/TimelockControllerUpgradeable.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract ContractsFactoryTest is Test {
@@ -19,8 +24,17 @@ contract ContractsFactoryTest is Test {
 
         crsManager = new MockCrsManager();
 
+        address memberTokenImpl = address(new ERC1155TokenUpgradeable());
+        address timelockImpl = address(new TimelockControllerUpgradeable());
+        address approvalGovImpl = address(new ApprovalGovernor());
+        address quadraticGovImpl = address(new QuadraticGovernor());
+        address governorGeneralImpl = address(new GovernorGeneral());
+
         address factoryImpl = address(new ContractsFactory());
-        bytes memory initData = abi.encodeCall(ContractsFactory.initialize, (factoryOwner));
+        bytes memory initData = abi.encodeCall(
+            ContractsFactory.initialize,
+            (factoryOwner, memberTokenImpl, timelockImpl, approvalGovImpl, quadraticGovImpl, governorGeneralImpl)
+        );
         factory = ContractsFactory(address(new ERC1967Proxy(factoryImpl, initData)));
     }
 

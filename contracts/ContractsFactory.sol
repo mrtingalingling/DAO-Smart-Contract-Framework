@@ -65,14 +65,35 @@ contract ContractsFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         _disableInitializers();
     }
 
-    function initialize(address _owner) public initializer {
+    function initialize(
+        address _owner,
+        address _memberTokenImpl,
+        address _timelockImpl,
+        address _approvalGovImpl,
+        address _quadraticGovImpl,
+        address _governorGeneralImpl
+    ) public initializer {
         __Ownable_init(_owner);
 
-        memberTokenImpl = address(new ERC1155TokenUpgradeable());
-        timelockImpl = address(new TimelockControllerUpgradeable());
-        approvalGovImpl = address(new ApprovalGovernor());
-        quadraticGovImpl = address(new QuadraticGovernor());
-        governorGeneralImpl = address(new GovernorGeneral());
+        memberTokenImpl = _memberTokenImpl;
+        timelockImpl = _timelockImpl;
+        approvalGovImpl = _approvalGovImpl;
+        quadraticGovImpl = _quadraticGovImpl;
+        governorGeneralImpl = _governorGeneralImpl;
+    }
+
+    function setImplementations(
+        address _memberTokenImpl,
+        address _timelockImpl,
+        address _approvalGovImpl,
+        address _quadraticGovImpl,
+        address _governorGeneralImpl
+    ) external onlyOwner {
+        memberTokenImpl = _memberTokenImpl;
+        timelockImpl = _timelockImpl;
+        approvalGovImpl = _approvalGovImpl;
+        quadraticGovImpl = _quadraticGovImpl;
+        governorGeneralImpl = _governorGeneralImpl;
     }
 
     /**

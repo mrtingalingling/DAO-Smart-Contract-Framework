@@ -50,3 +50,30 @@ Each future functional change appends an entry here to maintain an auditable, mi
 - The external Contribution Reputation Score calculation algorithm itself (mocked in tests via `ICrsManager`).
 
 **Uncertainties:** none.
+
+## 2026-09-23T23:01:00Z — feat/refactor-multistage-governance-erc1155
+**What changed:**
+- Refactored `ContractsFactory` to accept implementation contract addresses in `initialize(...)` and added `setImplementations(...)`, reducing contract size from 44.3KB to 8.6KB (well under the 24.576KB EIP-170 limit).
+- Standardized `ApprovalGovernor` and `QuadraticGovernor` initializers to explicitly take `address _owner` and initialize `__Ownable_init(_owner)`.
+- Restored original `README.md` documentation and added extensive sections covering architecture, UUPS upgradeability, agency customization guide, and Foundry testing. Restored `EnDAOsmentProcessFlow.svg` and `LICENSE`.
+- Added `test/Upgradeability.t.sol` testing UUPS upgradeability and state preservation across all 5 upgradeable contracts.
+- Verified on-chain deployments and agency DAO proxy instantiation against a local Anvil node.
+
+**Why:** Satisfies user requirement to verify contract upgradeability, ensures EIP-170 EVM compliance for factory deployments, verifies deployment on Anvil, and preserves documentation for community developers building on the framework.
+
+**Files touched:**
+- `contracts/ContractsFactory.sol`
+- `contracts/ApprovalGovernor.sol`
+- `contracts/QuadraticGovernor.sol`
+- `script/DeployFactory.s.sol`
+- `test/ContractsFactory.t.sol`
+- `test/Upgradeability.t.sol`
+- `README.md`
+- `.gitignore`
+- `REPO_EDIT_LOG.md`
+
+**Tests added:** 5 new tests in `test/Upgradeability.t.sol` (25 passing tests in total).
+
+**Deliberately not changed:** none.
+
+**Uncertainties:** none.
