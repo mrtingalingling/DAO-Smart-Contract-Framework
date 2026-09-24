@@ -173,3 +173,79 @@ Each component proxy can be independently upgraded by the agency's administrator
   ApprovalGovernor(approvalProxy).setQuorumScore(newQuorum);
   QuadraticGovernor(quadraticProxy).setQuadraticQuorum(newQuorum);
   ```
+
+---
+
+## 7. Managing Governance Epochs & Anti-Spam Deposits
+
+Agencies can tune proposal pacing and protect their community from governance spam:
+
+### A. Configuring Anti-Spam Proposal Bonds
+To deter spam proposals, set a refundable native token deposit (in wei):
+```solidity
+// Require 0.1 ETH / native token deposit per proposal
+governorGeneral.setProposalDeposit(0.1 ether);
+```
+- Proposers who achieve Stage 1 consensus receive a **100% refund**.
+- Proposals that fail Stage 1 have their deposit **slashed to the agency Timelock**.
+
+### B. Setting Governance Epochs
+To constrain voter fatigue and prevent members from having infinite credit allocations across concurrent votes:
+```solidity
+// Set epoch duration to 30 days (in blocks or seconds depending on clock mode)
+governorGeneral.setEpochDuration(30 days);
+```
+- Members spend from a single cumulative credit budget across all proposals within the epoch.
+- When an epoch expires, any community member can call:
+```solidity
+governorGeneral.advanceEpoch();
+```
+All members receive a fresh quadratic credit allocation for proposals submitted in the new epoch.
+
+---
+
+## 8. Frontend & Gasless Voting Integration (EIP-712)
+
+Agency frontends can provide gasless voting experiences so DAO members sign votes without paying transaction fees:
+
+```typescript
+// 1. Construct EIP-712 Typed Data
+const domain = {
+  name: "GovernorGeneral",
+  version: "1",
+  chainId: await signer.getChainId(),
+  verifyingContract: governorGeneralAddress
+};
+
+const types = {
+  ApprovalVote: [
+    { name: "proposalId", type: "uint256" },
+    { name: "support", type: "uint8" },
+    { name: "tokenId", type: "uint256" },
+    { name: "voter", type: "address" },
+    { name: "nonce", type: "uint256" }
+  ]
+};
+
+const value = {
+  proposalId,
+  support: 1, // 1 = For
+  tokenId: 1, // Member badge
+  voter: await signer.getAddress(),
+  nonce: await governorGeneral.nonces(voterAddress)
+};
+
+// 2. Member signs off-chain (EIP-712)
+const signature = await signer.signTypedData(domain, types, value);
+
+// 3. Agency relayer broadcasts on-chain
+await governorGeneralRelayer.castApprovalVoteBySig(
+  proposalId,
+  1,
+  1,
+  voterAddress,
+  signature
+);
+```
+Works out-of-the-box with Metamask, Coinbase Wallet, Frame, and ERC-1271 multi-sigs (Gnosis Safe).
+

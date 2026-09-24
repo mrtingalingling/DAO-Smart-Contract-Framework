@@ -7,13 +7,14 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./MemberToken.sol";
 import "./ICrsManager.sol";
+import "./IStageGovernor.sol";
 
 /**
  * @title ApprovalGovernor
  * @dev Governance module for Stage 1: Proposal (Value) Ranking (Approval Voting).
- * Votes are weighted by the voter's Contribution Reputation Score (CRS).
+ * Votes are weighted by the voter's Contribution Reputation Score (CRS) snapshot.
  */
-contract ApprovalGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+contract ApprovalGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable, IStageGovernor {
     struct ProposalVote {
         uint256 forVotes;
         uint256 againstVotes;
@@ -68,13 +69,22 @@ contract ApprovalGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable 
 
     function setGovernorGeneral(address _governorGeneral) external onlyOwner {
         if (_governorGeneral == address(0)) revert ZeroAddress();
-        emit GovernorGeneralUpdated(governorGeneral, _governorGeneral);
+        address old = governorGeneral;
         governorGeneral = _governorGeneral;
+        emit GovernorGeneralUpdated(old, _governorGeneral);
     }
 
     function setQuorumScore(uint256 _quorumScore) external onlyOwner {
-        emit QuorumScoreUpdated(quorumScore, _quorumScore);
+        uint256 old = quorumScore;
         quorumScore = _quorumScore;
+        emit QuorumScoreUpdated(old, _quorumScore);
+    }
+
+    /**
+     * @notice Returns stage identifier (1 = Approval).
+     */
+    function stageId() external pure override returns (uint8) {
+        return 1;
     }
 
     /**
@@ -101,8 +111,8 @@ contract ApprovalGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         uint256 balance = memberToken.getPastBalanceOf(voter, tokenId, snapshot);
         if (balance == 0) revert NotMember();
 
-        // Calculate vote weight based on CRS
-        uint256 score = crsManager.getCrs(voter, tokenId);
+        // Calculate vote weight based on snapshot CRS (immune to post-proposal score change)
+        uint256 score = crsManager.getPastCrs(voter, tokenId, snapshot);
         // Default base weight of 1e18 if score is 0
         uint256 weight = score > 0 ? score : 1e18;
 
@@ -124,14 +134,48 @@ contract ApprovalGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         return _proposalVotes[proposalId].hasVoted[account];
     }
 
-    function getVotes(uint256 proposalId) external view returns (uint256 forVotes, uint256 againstVotes, uint256 abstainVotes) {
+    function getVotes(uint256 proposalId)
+        external
+        view
+        override
+        returns (uint256 forVotes, uint256 againstVotes, uint256 abstainVotes)
+    {
         ProposalVote storage pv = _proposalVotes[proposalId];
         return (pv.forVotes, pv.againstVotes, pv.abstainVotes);
     }
 
-    function hasPassed(uint256 proposalId) external view returns (bool) {
+    function hasPassed(uint256 proposalId) external view override returns (bool) {
         ProposalVote storage pv = _proposalVotes[proposalId];
         return (pv.forVotes >= quorumScore && pv.forVotes > pv.againstVotes);
+    }
+
+    /**
+     * @notice Current timepoint synced from MemberToken with safe fallback.
+     */
+    function clock() public view virtual override returns (uint48) {
+        if (address(memberToken).code.length > 0) {
+            try memberToken.clock() returns (uint48 timepoint) {
+                return timepoint;
+            } catch {
+                return uint48(block.number);
+            }
+        }
+        return uint48(block.number);
+    }
+
+    /**
+     * @notice Description of the clock mode synced from MemberToken with safe fallback.
+     */
+    // solhint-disable-next-line func-name-mixedcase
+    function CLOCK_MODE() public view virtual override returns (string memory) {
+        if (address(memberToken).code.length > 0) {
+            try memberToken.CLOCK_MODE() returns (string memory mode) {
+                return mode;
+            } catch {
+                return "mode=blocknumber&finality=finalized";
+            }
+        }
+        return "mode=blocknumber&finality=finalized";
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}

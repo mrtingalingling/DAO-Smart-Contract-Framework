@@ -128,4 +128,64 @@ All contracts use OpenZeppelin's **UUPS (Universal Upgradeable Proxy Standard)**
   - `QuadraticGovernor`: `onlyOwner`
   - `GovernorGeneral`: `onlyOwner`
   - `ContractsFactory`: `onlyOwner`
-- Every contract reserves a 50-slot storage gap (`uint256[50] private __gap;`) to allow seamless addition of future state variables without storage collision.
+- Every contract reserves a 50-slot storage gap (`uint256[N] private __gap;`) to allow seamless addition of future state variables without storage collision.
+
+---
+
+## 5. Advanced Governance Features
+
+### 5.1 EIP-712 Gasless Voting (Meta-Transactions)
+To eliminate gas friction for DAO members, `GovernorGeneral` integrates native EIP-712 typed signature verification via OpenZeppelin's `SignatureChecker` (supporting both EOA signatures and ERC-1271 smart contract wallets like Safe):
+- **Approval Stage Signature**:
+  ```solidity
+  ApprovalVote(uint256 proposalId, uint8 support, uint256 tokenId, address voter, uint256 nonce)
+  ```
+  Submitted via `castApprovalVoteBySig(...)` with either 65-byte `signature` or `(uint8 v, bytes32 r, bytes32 s)`.
+- **Quadratic Stage Signature**:
+  ```solidity
+  QuadraticVote(uint256 proposalId, uint8 support, uint256 creditsToSpend, uint256 tokenId, address voter, uint256 nonce)
+  ```
+  Submitted via `castQuadraticVoteBySig(...)` with either `signature` or `(v, r, s)`.
+- **Replay Protection**: Per-voter sequential `nonces[voter]` incrementing after each signed vote prevents cross-submission replay attacks.
+
+### 5.2 Epoch-Based Batched Bounded Rationality Budgeting
+To prevent voter exhaustion and reflect real-world fiscal constraints, proposals are grouped into **Governance Epochs** (`currentEpoch`):
+- Rather than granting a fresh credit budget for every single proposal, each voter receives an aggregate credit pool per epoch:
+  $$\sum_{p \in \text{Epoch}} C_{p, \text{voter}} \le \text{CreditBudget}_{\text{voter}}$$
+- `QuadraticGovernor` tracks cumulative expenditure via `epochSpentCredits[epochId][voter]`.
+- As a voter allocates credits across multiple proposals in the same epoch, their remaining spending capacity decreases, forcing deliberate prioritization of scarce political capital.
+- Epochs are advanced permissionlessly upon duration expiry via `advanceEpoch()`.
+
+### 5.3 Snapshot Reputation Scoring (Flash-Loan / Boost Immunity)
+To guarantee that reputation cannot be artificially manipulated mid-vote:
+- `ApprovalGovernor` and `QuadraticGovernor` query historical reputation snapshots via `ICrsManager.getPastCrs(voter, tokenId, snapshot)`.
+- Stage 1 snapshots at `p.voteStart`.
+- Stage 2 snapshots at `p.quadraticStart`.
+- Any external reputation score boosts awarded after a proposal begins do not inflate voting power for that active proposal.
+
+### 5.4 Anti-Spam Proposal Deposit Bonds
+To mitigate spam and low-effort governance bloat:
+- `GovernorGeneral` supports configurable `proposalDeposit` bonds.
+- Proposers must attach `msg.value >= proposalDeposit` when calling `propose()`.
+- **Refund on Value Consensus**: If the proposal meets quorum and passes Stage 1, the full deposit is immediately refunded to the proposer upon advancing to Stage 2.
+- **Slash to Treasury on Defeat**: If the proposal fails to achieve Stage 1 consensus, the deposit is slashed and forwarded directly to the DAO Timelock treasury.
+- **Refund on Cancellation**: Proposers may cancel their proposal prior to execution and retrieve their deposit.
+
+### 5.5 ERC-6372 Clock & Mode Unification
+All governors unify their timekeeping with the underlying token standard:
+- `GovernorGeneral`, `ApprovalGovernor`, and `QuadraticGovernor` implement ERC-6372 `clock()` and `CLOCK_MODE()`.
+- Timekeeping automatically syncs with `memberToken.clock()`, ensuring seamless interoperability across both block-number and timestamp-based rollup networks (e.g. Arbitrum, Optimism, Base).
+
+### 5.6 Standardized Stage Interface (`IStageGovernor`)
+All modular stages implement the standardized `IStageGovernor` interface:
+```solidity
+interface IStageGovernor {
+    function stageId() external view returns (uint8);
+    function hasPassed(uint256 proposalId) external view returns (bool);
+    function getVotes(uint256 proposalId) external view returns (uint256 forVotes, uint256 againstVotes, uint256 abstainVotes);
+    function clock() external view returns (uint48);
+    function CLOCK_MODE() external view returns (string memory);
+}
+```
+This enables independent agencies to swap in custom consensus modules (e.g., conviction voting, futarchy, ranked choice) without modifying `GovernorGeneral`.
+

@@ -8,20 +8,21 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import "./MemberToken.sol";
 import "./ICrsManager.sol";
+import "./IStageGovernor.sol";
 
 /**
  * @title QuadraticGovernor
  * @dev Governance module for Stage 2: Resource Allocation (Quadratic Voting).
- * Allocates voting credits based on Contribution Reputation Score (CRS).
- * The voting power gained is the square root of credits spent: V = sqrt(C).
+ * Implements bounded rationality via epoch-based credit budgets derived from snapshot CRS.
+ * Enforces voting power strictly as V = floor(sqrt(C)).
  */
-contract QuadraticGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+contract QuadraticGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable, IStageGovernor {
     struct ProposalVote {
         uint256 forVotes;
         uint256 againstVotes;
         uint256 abstainVotes;
-        mapping(address => uint256) spentCredits;
         mapping(address => bool) hasVoted;
+        mapping(address => uint256) spentCredits;
     }
 
     ERC1155TokenUpgradeable public memberToken;
@@ -29,11 +30,14 @@ contract QuadraticGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable
     address public governorGeneral;
     uint256 public quadraticQuorum;
 
-    // Base credits multiplier (1e18 score = 10,000 voting credits)
-    uint256 public constant CREDITS_SCALE = 1e14;
-    uint256 public constant MIN_CREDITS = 1_000;
+    // Minimum baseline voting credits allocated to any badge holder
+    uint256 public constant MIN_CREDITS = 100;
+    // Scale factor to convert CRS score into quadratic voting credits
+    uint256 public constant CREDITS_SCALE = 1e16;
 
     mapping(uint256 => ProposalVote) private _proposalVotes;
+    // epochId => voter => cumulative credits spent across all proposals in this epoch
+    mapping(uint256 => mapping(address => uint256)) public epochSpentCredits;
 
     event QuadraticVoteCast(
         address indexed voter,
@@ -42,7 +46,13 @@ contract QuadraticGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable
         uint256 creditsSpent,
         uint256 votesCast
     );
-    event QuadraticQuorumUpdated(uint256 oldQuorum, uint256 newQuorum);
+    event EpochCreditsSpent(
+        uint256 indexed epochId,
+        address indexed voter,
+        uint256 creditsSpent,
+        uint256 totalEpochSpent
+    );
+    event QuadraticQuorumUpdated(uint256 oldQuadraticQuorum, uint256 newQuadraticQuorum);
     event GovernorGeneralUpdated(address indexed oldGovernorGeneral, address indexed newGovernorGeneral);
 
     error OnlyGovernorGeneral();
@@ -83,20 +93,29 @@ contract QuadraticGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable
 
     function setGovernorGeneral(address _governorGeneral) external onlyOwner {
         if (_governorGeneral == address(0)) revert ZeroAddress();
-        emit GovernorGeneralUpdated(governorGeneral, _governorGeneral);
+        address old = governorGeneral;
         governorGeneral = _governorGeneral;
+        emit GovernorGeneralUpdated(old, _governorGeneral);
     }
 
     function setQuadraticQuorum(uint256 _quadraticQuorum) external onlyOwner {
-        emit QuadraticQuorumUpdated(quadraticQuorum, _quadraticQuorum);
+        uint256 old = quadraticQuorum;
         quadraticQuorum = _quadraticQuorum;
+        emit QuadraticQuorumUpdated(old, _quadraticQuorum);
     }
 
     /**
-     * @notice Computes maximum voting credits allocated to a member based on CRS.
+     * @notice Returns stage identifier (2 = Quadratic).
      */
-    function getCreditBudget(address voter, uint256 tokenId) public view returns (uint256) {
-        uint256 score = crsManager.getCrs(voter, tokenId);
+    function stageId() external pure override returns (uint8) {
+        return 2;
+    }
+
+    /**
+     * @notice Computes maximum voting credits allocated to a member based on snapshot CRS.
+     */
+    function getCreditBudget(address voter, uint256 tokenId, uint256 snapshot) public view returns (uint256) {
+        uint256 score = crsManager.getPastCrs(voter, tokenId, snapshot);
         if (score == 0) {
             return MIN_CREDITS;
         }
@@ -105,13 +124,24 @@ contract QuadraticGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable
     }
 
     /**
+     * @notice Backwards-compatible convenience getter using latest block.
+     */
+    function getCreditBudget(address voter, uint256 tokenId) external view returns (uint256) {
+        uint48 current = memberToken.clock();
+        uint48 timepoint = current > 0 ? current - 1 : 0;
+        return getCreditBudget(voter, tokenId, timepoint);
+    }
+
+    /**
      * @notice Casts a quadratic vote for a proposal in Stage 2.
+     * Enforces bounded rationality by checking remaining credit budget within the proposal's epoch.
      * @param proposalId The ID of the proposal.
      * @param voter The address of the voter.
      * @param support 0 = Against, 1 = For, 2 = Abstain.
      * @param creditsToSpend Amount of voting credits to spend (V = sqrt(credits)).
      * @param tokenId The ERC1155 member badge token ID.
      * @param snapshot The snapshot block number for balance check.
+     * @param epochId The fiscal epoch ID of the proposal.
      */
     function castVote(
         uint256 proposalId,
@@ -119,7 +149,8 @@ contract QuadraticGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable
         uint8 support,
         uint256 creditsToSpend,
         uint256 tokenId,
-        uint256 snapshot
+        uint256 snapshot,
+        uint256 epochId
     ) external onlyGovernorGeneral returns (uint256) {
         if (support > 2) revert InvalidVoteChoice();
         if (creditsToSpend == 0) revert ZeroCreditsSpent();
@@ -131,9 +162,15 @@ contract QuadraticGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable
         uint256 balance = memberToken.getPastBalanceOf(voter, tokenId, snapshot);
         if (balance == 0) revert NotMember();
 
-        // Verify credit budget
-        uint256 maxCredits = getCreditBudget(voter, tokenId);
-        if (creditsToSpend > maxCredits) revert InsufficientVotingCredits();
+        // Verify credit budget based on snapshot CRS
+        uint256 maxCredits = getCreditBudget(voter, tokenId, snapshot);
+        uint256 spentInEpoch = epochSpentCredits[epochId][voter];
+        if (spentInEpoch + creditsToSpend > maxCredits) {
+            revert InsufficientVotingCredits();
+        }
+
+        // Deduct credits from epoch pool (bounded rationality across batched proposals)
+        epochSpentCredits[epochId][voter] = spentInEpoch + creditsToSpend;
 
         // Calculate quadratic votes: V = sqrt(C)
         uint256 votesCast = Math.sqrt(creditsToSpend);
@@ -149,6 +186,7 @@ contract QuadraticGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable
             pv.abstainVotes += votesCast;
         }
 
+        emit EpochCreditsSpent(epochId, voter, creditsToSpend, spentInEpoch + creditsToSpend);
         emit QuadraticVoteCast(voter, proposalId, support, creditsToSpend, votesCast);
         return votesCast;
     }
@@ -161,17 +199,51 @@ contract QuadraticGovernor is Initializable, OwnableUpgradeable, UUPSUpgradeable
         return _proposalVotes[proposalId].spentCredits[account];
     }
 
-    function getVotes(uint256 proposalId) external view returns (uint256 forVotes, uint256 againstVotes, uint256 abstainVotes) {
+    function getVotes(uint256 proposalId)
+        external
+        view
+        override
+        returns (uint256 forVotes, uint256 againstVotes, uint256 abstainVotes)
+    {
         ProposalVote storage pv = _proposalVotes[proposalId];
         return (pv.forVotes, pv.againstVotes, pv.abstainVotes);
     }
 
-    function hasPassed(uint256 proposalId) external view returns (bool) {
+    function hasPassed(uint256 proposalId) external view override returns (bool) {
         ProposalVote storage pv = _proposalVotes[proposalId];
         return (pv.forVotes >= quadraticQuorum && pv.forVotes > pv.againstVotes);
     }
 
+    /**
+     * @notice Current timepoint synced from MemberToken with safe fallback.
+     */
+    function clock() public view virtual override returns (uint48) {
+        if (address(memberToken).code.length > 0) {
+            try memberToken.clock() returns (uint48 timepoint) {
+                return timepoint;
+            } catch {
+                return uint48(block.number);
+            }
+        }
+        return uint48(block.number);
+    }
+
+    /**
+     * @notice Description of the clock mode synced from MemberToken with safe fallback.
+     */
+    // solhint-disable-next-line func-name-mixedcase
+    function CLOCK_MODE() public view virtual override returns (string memory) {
+        if (address(memberToken).code.length > 0) {
+            try memberToken.CLOCK_MODE() returns (string memory mode) {
+                return mode;
+            } catch {
+                return "mode=blocknumber&finality=finalized";
+            }
+        }
+        return "mode=blocknumber&finality=finalized";
+    }
+
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
-    uint256[49] private __gap;
+    uint256[48] private __gap;
 }

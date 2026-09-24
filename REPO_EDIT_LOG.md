@@ -125,3 +125,41 @@ Each future functional change appends an entry here to maintain an auditable, mi
 **Deliberately not changed:** Smart contract implementations remain unchanged.
 
 **Uncertainties:** none.
+
+## 2026-09-24T01:25:00Z — feat: advanced governance features (EIP-712, Epochs, Snapshot CRS, Deposit Bonds, Clock Unification, Stage Interface)
+**What changed:**
+- Created `contracts/IStageGovernor.sol`: standardized interface for modular governance stages (`stageId`, `hasPassed`, `getVotes`, `clock`, `CLOCK_MODE`).
+- Updated `contracts/ApprovalGovernor.sol`: implemented `IStageGovernor`, integrated historical snapshot CRS lookup (`getPastCrs(voter, tokenId, snapshot)`), and synchronized ERC-6372 `clock()` and `CLOCK_MODE()` with safe token fallback.
+- Updated `contracts/QuadraticGovernor.sol`: implemented `IStageGovernor`, historical snapshot CRS lookup, unified ERC-6372 clock, and added epoch-level cumulative credit budgeting (`epochSpentCredits[epochId][voter]`) to enforce bounded rationality across concurrent proposals.
+- Updated `contracts/GovernorGeneral.sol`: inherited `EIP712Upgradeable` with `SignatureChecker` supporting EOA and ERC-1271 (Safe) gasless meta-transactions (`castApprovalVoteBySig`, `castQuadraticVoteBySig`), epoch governance lifecycle (`advanceEpoch`, `setEpochDuration`), anti-spam proposal deposit bonds (`propose{value: deposit}`, refunded on Stage 1 passage or cancellation, slashed to Timelock on Stage 1 defeat), and unified ERC-6372 clock.
+- Created `test/mocks/MockTarget.sol` as reusable execution target mock.
+- Created `test/AdvancedGovernanceFeatures.t.sol`: 10 comprehensive tests covering EIP-712 gasless voting (signatures & relayer submission, signature replay prevention), epoch budget bounds (shared pool limits across proposals, epoch advancement resets), snapshot CRS score immutability (immunity to mid-vote reputation boosts), proposal deposit bonds (refund on Stage 1 pass, slash on defeat, refund on cancel), and ERC-6372 clock synchronization.
+- Updated `docs/ARCHITECTURE.md` and `docs/FEDERATED_AGENCY_GUIDE.md` with operational guidance and TypeScript frontend snippets.
+
+**Why:** Addresses user request to proceed with all surfaced governance improvements:
+1. Snapshot CRS prevents flash-loan and mid-vote reputation manipulation attacks.
+2. Epoch-based bounded rationality prevents voter fatigue and enforces realistic fiscal budgeting across proposals.
+3. EIP-712 gasless voting eliminates gas friction for community members and supports smart contract wallets (Gnosis Safe).
+4. Proposal deposit bonds prevent governance spam while protecting legitimate contributors.
+5. ERC-6372 clock unification ensures seamless L2 rollup compatibility.
+6. `IStageGovernor` provides a modular foundation for federated agencies to customize governance voting stages.
+
+**Files touched:**
+- `contracts/IStageGovernor.sol` (new)
+- `contracts/ApprovalGovernor.sol`
+- `contracts/QuadraticGovernor.sol`
+- `contracts/GovernorGeneral.sol`
+- `test/mocks/MockTarget.sol` (new)
+- `test/AdvancedGovernanceFeatures.t.sol` (new)
+- `docs/ARCHITECTURE.md`
+- `docs/FEDERATED_AGENCY_GUIDE.md`
+- `REPO_EDIT_LOG.md`
+
+**Tests added:** 10 new tests in `test/AdvancedGovernanceFeatures.t.sol` (bringing total test suite to 35 passed tests across 6 suites).
+
+**Deliberately not changed:**
+- `README.md` original top section and `EnDAOsmentProcessFlow.svg` remain 100% byte-for-byte identical to `origin/main`.
+- `ContractsFactory.sol` deployment signatures remain compatible.
+
+**Uncertainties:** none.
+
