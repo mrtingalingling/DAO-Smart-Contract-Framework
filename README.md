@@ -1,5 +1,3 @@
-# EnDAOsment: Multi-Stage DAO Smart Contract Framework
-
 The EnDAOsment's modular governance framework utilizes a CORE contract that acts as a central hub, dynamically determining which governance module, either an Approval or Quadratic Governor, is invoked based on the current stage of a proposal. This modular design allows for a flexible and adaptable governance system that can evolve with the needs of the DAO. I believe that a decision involves two components: 
  - **Equitable Collective/Communal Value**
  - **Socioeconomically Sustainable Development**
@@ -8,7 +6,7 @@ Existing major DAO platforms lack a comprehensive multi-stage decision-making fr
 
 **Modular Governance**: The framework utilizes a modular design, enabling the interchange and customization of governance components. This avoids the need for forking and rewriting entire contracts when adapting to changing needs or requirements.
 
-![EnDAOsment Process Flow](EnDAOsmentProcessFlow.svg)
+<img src="https://github.com/EnDAOsment/DAO-Smart-Contract-Framework/blob/main/EnDAOsmentProcessFlow.svg" alt="EnDAOsment Process Flow">
 
 Here's a breakdown of how this framework would operates:
 1. **Governor General** [CORE Contract]: This central contract serves as the entry point for all governance proposals and holds the logic for determining which specific Governor contract to use at each stage of a proposal's lifecycle.
