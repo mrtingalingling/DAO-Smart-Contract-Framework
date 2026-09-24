@@ -100,3 +100,28 @@ Each future functional change appends an entry here to maintain an auditable, mi
 **Deliberately not changed:** Smart contract bytecodes and logic were unchanged.
 
 **Uncertainties:** none.
+
+## 2026-09-24T00:59:00Z — chore: reconcile and merge origin/main into feature branch
+**What changed:**
+- Reconciled branch differences between `origin/main`, `origin/contractsInit`, and `feat/refactor-multistage-governance-erc1155`:
+  - Removed 10,707 lines of redundant `.deps/npm/@openzeppelin/...` artifacts checked in from Remix on `contractsInit`.
+  - Added `.deps/` to `.gitignore`.
+  - Synchronized `EnDAOsmentProcessFlow.svg` with latest version on `origin/main`.
+  - Merged `origin/main` cleanly into `feat/refactor-multistage-governance-erc1155`.
+- Verified that merging into `origin/main` has zero conflicts (`git merge-tree` verified).
+- Verified that all 25 tests pass cleanly.
+
+**Why:** Addresses user request to compare and reconcile `main` and `contractsInit` so changes can be merged into `main`.
+
+**Files touched:**
+- `.deps/` (removed)
+- `.gitignore`
+- `EnDAOsmentProcessFlow.svg`
+- `README.md`
+- `REPO_EDIT_LOG.md`
+
+**Tests added:** none (reconciliation and merge only; 25 tests passing).
+
+**Deliberately not changed:** Smart contract implementations remain unchanged.
+
+**Uncertainties:** none.
