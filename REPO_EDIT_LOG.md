@@ -163,3 +163,39 @@ Each future functional change appends an entry here to maintain an auditable, mi
 
 **Uncertainties:** none.
 
+## 2026-09-24T02:36:00Z — feat: federated beacon proxy pattern with sovereign downstream overrides
+**What changed:**
+- Created `contracts/FederatedBeaconProxy.sol`:
+  - Implements the Federated Beacon Proxy pattern with standard ERC-1967 storage slots.
+  - Automatically delegates all calls to the canonical Federal Protocol `UpgradeableBeacon` (`IBeacon.implementation()`).
+  - Equips downstream agency administrators with sovereign override rights: `overrideImplementation(address customImpl)` to point their proxy to custom smart contracts, and `resetToFederalBeacon()` to restore tracking of the federal beacon.
+  - Selective selector interception ensures normal governance calls (e.g. `propose`, `castVote`, `transferOwnership`) pass transparently through `fallback()` to the active implementation, even when initiated by the agency administrator.
+- Enhanced `contracts/ContractsFactory.sol`:
+  - Added federal beacon storage pointers (`memberTokenBeacon`, `approvalGovBeacon`, `quadraticGovBeacon`, `governorGeneralBeacon`).
+  - Added `setFederalBeacons(...)` and `createFederalBeacons(...)` restricted to `onlyOwner`.
+  - Added `deployFederatedAgencyDAO(AgencyDAOConfig calldata config)` enabling agencies to deploy in Federated Beacon mode while retaining local sovereign override capability.
+  - Preserved existing `deployAgencyDAO(...)` for autonomous standalone UUPS deployments.
+  - Preserved 50-slot storage layout gap (`uint256[40] private __gap;`).
+- Created `test/FederatedBeaconOverride.t.sol`:
+  - 10 comprehensive tests validating federal beacon creation, federated agency deployment, automatic propagation of federal beacon upgrades, downstream agency custom contract overrides, immunity of overridden proxies from upstream upgrades, restoration back to the federal standard, unauthorized access rejection, and dual deployment modes in the factory.
+- Updated `docs/ARCHITECTURE.md` (Section 6) and `docs/FEDERATED_AGENCY_GUIDE.md` (Section 9) with architectural diagrams, developer guidance, and Solidity code examples.
+
+**Why:** Addresses user request to enable the Beacon Proxy pattern as an optional module, establishing a federated hierarchy where the federal protocol sets baseline standards while downstream organizations maintain the sovereign authority to override through custom contracts.
+
+**Files touched:**
+- `contracts/FederatedBeaconProxy.sol` (new)
+- `contracts/ContractsFactory.sol`
+- `test/FederatedBeaconOverride.t.sol` (new)
+- `docs/ARCHITECTURE.md`
+- `docs/FEDERATED_AGENCY_GUIDE.md`
+- `REPO_EDIT_LOG.md`
+
+**Tests added:** 10 new tests in `test/FederatedBeaconOverride.t.sol` (bringing total test suite to 45 passed tests across 7 suites).
+
+**Deliberately not changed:**
+- Autonomous UUPS deployment flow (`deployAgencyDAO`) remains 100% backward compatible and unchanged.
+- `README.md` and `EnDAOsmentProcessFlow.svg` remain 100% byte-for-byte identical to `origin/main`.
+
+**Uncertainties:** none.
+
+

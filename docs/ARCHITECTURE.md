@@ -189,3 +189,46 @@ interface IStageGovernor {
 ```
 This enables independent agencies to swap in custom consensus modules (e.g., conviction voting, futarchy, ranked choice) without modifying `GovernorGeneral`.
 
+---
+
+## 6. Federated Beacon Proxy Architecture & Sovereign Overrides
+
+To balance federal protocol-wide upgrades with local agency autonomy, the framework introduces the **Federated Beacon Proxy pattern** via [`FederatedBeaconProxy.sol`](../contracts/FederatedBeaconProxy.sol).
+
+```
+                      ┌──────────────────────────────────────────────┐
+                      │            Federal Protocol Level            │
+                      │     Canonical UpgradeableBeacon (Admin)      │
+                      └──────────────────────┬───────────────────────┘
+                                             │
+                          ┌──────────────────┴──────────────────┐
+                          │ tracks canonical implementation     │
+                          ▼                                     ▼
+          ┌───────────────────────────────┐     ┌───────────────────────────────┐
+          │     Agency A (Federal Mode)   │     │   Agency B (Overridden Mode)  │
+          │     FederatedBeaconProxy      │     │     FederatedBeaconProxy      │
+          │  customImplementation = 0x0   │     │  customImplementation = 0x123 │
+          │  ==> Resolves to Federal      │     │  ==> Resolves to Custom Logic │
+          └───────────────────────────────┘     └───────────────┬───────────────┘
+                                                                │
+                                                                ▼
+                                                ┌───────────────────────────────┐
+                                                │   Agency B Custom Contract    │
+                                                │  (Custom Quadratic Math / CRS)│
+                                                └───────────────────────────────┘
+```
+
+### Sovereign Downstream Override
+1. **Federal Default**: By default, each `FederatedBeaconProxy` delegates calls to `IBeacon(beacon).implementation()`. When the federal protocol team upgrades a beacon, all agencies in Federal Mode automatically receive the upgrade.
+2. **Agency Override**: If an agency requires custom voting rules or objects to a federal upgrade, the agency administrator calls:
+   ```solidity
+   proxy.overrideImplementation(customLogicAddress);
+   ```
+   This writes `customLogicAddress` into the standard ERC-1967 implementation slot. The proxy immediately begins executing the custom contract, becoming **immune** to upstream federal beacon upgrades.
+3. **Reversibility**: If the agency subsequently wishes to realign with the federal standard, the agency administrator calls:
+   ```solidity
+   proxy.resetToFederalBeacon();
+   ```
+   This clears the custom implementation slot, seamlessly resuming tracking of the federal beacon.
+4. **Transparent Governance Access**: Sovereign admin methods (`overrideImplementation`, `resetToFederalBeacon`, `changeAgencyAdmin`) are selectively dispatched. Normal governance calls (e.g. `propose`, `castVote`, `transferOwnership`) pass transparently through `fallback()` to `_implementation()`, even when initiated by the agency administrator.
+

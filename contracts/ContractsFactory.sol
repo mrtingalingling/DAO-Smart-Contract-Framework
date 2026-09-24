@@ -7,10 +7,12 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {TimelockControllerUpgradeable} from "@openzeppelin/contracts-upgradeable/governance/TimelockControllerUpgradeable.sol";
+import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "./MemberToken.sol";
 import "./ApprovalGovernor.sol";
 import "./QuadraticGovernor.sol";
 import "./GovernorGeneral.sol";
+import "./FederatedBeaconProxy.sol";
 
 /**
  * @title ContractsFactory
@@ -51,6 +53,11 @@ contract ContractsFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
     AgencyDAODeployment[] public allDeployments;
     mapping(address => AgencyDAODeployment[]) public deploymentsByAgency;
 
+    address public memberTokenBeacon;
+    address public approvalGovBeacon;
+    address public quadraticGovBeacon;
+    address public governorGeneralBeacon;
+
     event AgencyDAOCreated(
         address indexed agencyAdmin,
         address memberToken,
@@ -58,6 +65,30 @@ contract ContractsFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         address approvalGovernor,
         address quadraticGovernor,
         address governorGeneral
+    );
+
+    event FederatedAgencyDAOCreated(
+        address indexed agencyAdmin,
+        address memberToken,
+        address timelock,
+        address approvalGovernor,
+        address quadraticGovernor,
+        address governorGeneral
+    );
+
+    event FederalBeaconsUpdated(
+        address memberTokenBeacon,
+        address approvalGovBeacon,
+        address quadraticGovBeacon,
+        address governorGeneralBeacon
+    );
+
+    event FederalBeaconsCreated(
+        address memberTokenBeacon,
+        address approvalGovBeacon,
+        address quadraticGovBeacon,
+        address governorGeneralBeacon,
+        address indexed beaconOwner
     );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -94,6 +125,52 @@ contract ContractsFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         approvalGovImpl = _approvalGovImpl;
         quadraticGovImpl = _quadraticGovImpl;
         governorGeneralImpl = _governorGeneralImpl;
+    }
+
+    /**
+     * @notice Registers existing canonical UpgradeableBeacon addresses for the federated DAO modules.
+     */
+    function setFederalBeacons(
+        address _memberTokenBeacon,
+        address _approvalGovBeacon,
+        address _quadraticGovBeacon,
+        address _governorGeneralBeacon
+    ) external onlyOwner {
+        memberTokenBeacon = _memberTokenBeacon;
+        approvalGovBeacon = _approvalGovBeacon;
+        quadraticGovBeacon = _quadraticGovBeacon;
+        governorGeneralBeacon = _governorGeneralBeacon;
+
+        emit FederalBeaconsUpdated(
+            _memberTokenBeacon,
+            _approvalGovBeacon,
+            _quadraticGovBeacon,
+            _governorGeneralBeacon
+        );
+    }
+
+    /**
+     * @notice Deploys new canonical UpgradeableBeacon instances owned by beaconOwner.
+     */
+    function createFederalBeacons(address beaconOwner) external onlyOwner {
+        require(memberTokenImpl != address(0), "Factory: zero memberTokenImpl");
+        require(approvalGovImpl != address(0), "Factory: zero approvalGovImpl");
+        require(quadraticGovImpl != address(0), "Factory: zero quadraticGovImpl");
+        require(governorGeneralImpl != address(0), "Factory: zero governorGeneralImpl");
+        require(beaconOwner != address(0), "Factory: zero beaconOwner");
+
+        memberTokenBeacon = address(new UpgradeableBeacon(memberTokenImpl, beaconOwner));
+        approvalGovBeacon = address(new UpgradeableBeacon(approvalGovImpl, beaconOwner));
+        quadraticGovBeacon = address(new UpgradeableBeacon(quadraticGovImpl, beaconOwner));
+        governorGeneralBeacon = address(new UpgradeableBeacon(governorGeneralImpl, beaconOwner));
+
+        emit FederalBeaconsCreated(
+            memberTokenBeacon,
+            approvalGovBeacon,
+            quadraticGovBeacon,
+            governorGeneralBeacon,
+            beaconOwner
+        );
     }
 
     /**
@@ -167,6 +244,83 @@ contract ContractsFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
         deployment.governorGeneral = address(new ERC1967Proxy(governorGeneralImpl, generalInit));
     }
 
+    /**
+     * @notice Deploys a federated DAO for an agency using FederatedBeaconProxy.
+     * The components track canonical Federal Beacons by default, but the agency administrator
+     * retains sovereign rights to override any proxy with custom smart contracts.
+     */
+    function deployFederatedAgencyDAO(AgencyDAOConfig calldata config) external returns (AgencyDAODeployment memory deployment) {
+        require(config.agencyAdmin != address(0), "Factory: zero admin");
+        require(config.crsManager != address(0), "Factory: zero crsManager");
+        require(memberTokenBeacon != address(0), "Factory: zero memberTokenBeacon");
+        require(approvalGovBeacon != address(0), "Factory: zero approvalGovBeacon");
+        require(quadraticGovBeacon != address(0), "Factory: zero quadraticGovBeacon");
+        require(governorGeneralBeacon != address(0), "Factory: zero governorGeneralBeacon");
+
+        deployment = _deployFederatedProxies(config);
+        _wirePermissions(config.agencyAdmin, deployment);
+
+        allDeployments.push(deployment);
+        deploymentsByAgency[config.agencyAdmin].push(deployment);
+
+        emit FederatedAgencyDAOCreated(
+            config.agencyAdmin,
+            deployment.memberToken,
+            deployment.timelock,
+            deployment.approvalGovernor,
+            deployment.quadraticGovernor,
+            deployment.governorGeneral
+        );
+    }
+
+    function _deployFederatedProxies(AgencyDAOConfig calldata config) internal returns (AgencyDAODeployment memory deployment) {
+        // 1. MemberToken (FederatedBeaconProxy)
+        bytes memory tokenInit = abi.encodeCall(
+            ERC1155TokenUpgradeable.initialize,
+            (address(this), address(this), address(this), config.tokenUri)
+        );
+        deployment.memberToken = address(new FederatedBeaconProxy(memberTokenBeacon, config.agencyAdmin, tokenInit));
+
+        // 2. Timelock (Autonomous ERC1967Proxy for dedicated agency treasury isolation)
+        address[] memory emptyAddressArray = new address[](0);
+        bytes memory timelockInit = abi.encodeCall(
+            TimelockControllerUpgradeable.initialize,
+            (config.timelockMinDelay, emptyAddressArray, emptyAddressArray, address(this))
+        );
+        deployment.timelock = address(new ERC1967Proxy(timelockImpl, timelockInit));
+
+        // 3. ApprovalGovernor (FederatedBeaconProxy)
+        bytes memory approvalInit = abi.encodeCall(
+            ApprovalGovernor.initialize,
+            (address(this), deployment.memberToken, config.crsManager, config.approvalQuorum)
+        );
+        deployment.approvalGovernor = address(new FederatedBeaconProxy(approvalGovBeacon, config.agencyAdmin, approvalInit));
+
+        // 4. QuadraticGovernor (FederatedBeaconProxy)
+        bytes memory quadraticInit = abi.encodeCall(
+            QuadraticGovernor.initialize,
+            (address(this), deployment.memberToken, config.crsManager, config.quadraticQuorum)
+        );
+        deployment.quadraticGovernor = address(new FederatedBeaconProxy(quadraticGovBeacon, config.agencyAdmin, quadraticInit));
+
+        // 5. GovernorGeneral (FederatedBeaconProxy)
+        bytes memory generalInit = abi.encodeCall(
+            GovernorGeneral.initialize,
+            (
+                deployment.memberToken,
+                deployment.approvalGovernor,
+                deployment.quadraticGovernor,
+                payable(deployment.timelock),
+                config.votingDelay,
+                config.approvalPeriod,
+                config.quadraticPeriod,
+                config.proposalThreshold,
+                config.defaultMemberTokenId
+            )
+        );
+        deployment.governorGeneral = address(new FederatedBeaconProxy(governorGeneralBeacon, config.agencyAdmin, generalInit));
+    }
+
     function _wirePermissions(address agencyAdmin, AgencyDAODeployment memory deployment) internal {
         // Connect module governors to GovernorGeneral
         ApprovalGovernor(deployment.approvalGovernor).setGovernorGeneral(deployment.governorGeneral);
@@ -203,5 +357,5 @@ contract ContractsFactory is Initializable, OwnableUpgradeable, UUPSUpgradeable 
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
-    uint256[44] private __gap;
+    uint256[40] private __gap;
 }

@@ -249,3 +249,48 @@ await governorGeneralRelayer.castApprovalVoteBySig(
 ```
 Works out-of-the-box with Metamask, Coinbase Wallet, Frame, and ERC-1271 multi-sigs (Gnosis Safe).
 
+---
+
+## 9. Deployment Modes: Autonomous UUPS vs. Federated Beacon
+
+`ContractsFactory` provides independent agencies two distinct deployment architectures:
+
+### Mode 1: Autonomous UUPS (`deployAgencyDAO`)
+- **Best for**: Completely independent agencies requiring total sovereign isolation from the federal protocol.
+- **Mechanism**: Deploys individual ERC-1967 UUPS proxies. The agency administrator owns their own proxy upgrade rights (`onlyOwner` / timelock).
+- **Federal Link**: None. Federal protocol upgrades never touch autonomous UUPS instances.
+
+### Mode 2: Federated Beacon (`deployFederatedAgencyDAO`)
+- **Best for**: Agencies that want canonical federal improvements and bug fixes propagated automatically, while preserving sovereign rights to override or customize at will.
+- **Mechanism**: Deploys [`FederatedBeaconProxy`](../contracts/FederatedBeaconProxy.sol) instances pointing to the Federal Protocol's canonical `UpgradeableBeacon` contracts.
+
+#### Downstream Override & Customization Workflow
+
+If your agency develops a specialized governance rule (e.g. customized quadratic formula, special quorum, or custom badge gating):
+
+```solidity
+// 1. Deploy your agency's custom contract
+MockCustomStageGovernor customGovernor = new MockCustomStageGovernor("CustomRuleV1");
+
+// 2. As the agencyAdmin, call overrideImplementation on the proxy
+FederatedBeaconProxy(payable(deployment.approvalGovernor)).overrideImplementation(address(customGovernor));
+
+// 3. Verify override
+bool isOverridden = FederatedBeaconProxy(payable(deployment.approvalGovernor)).isOverridden(); // true
+```
+
+While overridden, the agency proxy **ignores upstream federal beacon upgrades** and executes the custom logic exclusively.
+
+#### Restoring the Federal Standard
+
+If the federal protocol incorporates your improvements in a future release and your agency wishes to re-join the federal baseline:
+
+```solidity
+// Realign with the Federal Beacon in a single transaction
+FederatedBeaconProxy(payable(deployment.approvalGovernor)).resetToFederalBeacon();
+
+// Verify restoration
+bool isOverridden = FederatedBeaconProxy(payable(deployment.approvalGovernor)).isOverridden(); // false
+```
+The proxy immediately resumes executing the latest canonical federal implementation.
+
